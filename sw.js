@@ -3,7 +3,7 @@
  * Gemini と地質図への問い合わせは保存しない（いつもネットに取りにいく）。
  * 版を上げるときは SHELL の末尾を app.js の APP_VERSION とそろえる（tools/check_data.py が点検する）。
  */
-const SHELL = 'ganseki-shell-1.0.0';
+const SHELL = 'ganseki-shell-1.1.0';
 const OWN = ['./', './index.html', './app.js', './judge.js', './ai.js', './rocks.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {

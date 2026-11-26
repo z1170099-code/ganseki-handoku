@@ -5,7 +5,7 @@
  */
 (function () {
   'use strict';
-  const APP_VERSION = '1.0.0';
+  const APP_VERSION = '1.1.0';
   const J = window.Judge, AI = window.AI;
   const LS = { key: 'ganseki.key', model: 'ganseki.model', modelCustom: 'ganseki.modelCustom', tab: 'ganseki.tab' };
   const MAX_PHOTOS = 3;
@@ -215,7 +215,7 @@
       default:
         bg('#cccccc');
     }
-    return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" aria-hidden="true" focusable="false">' + g + '</svg>';
+    return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">' + g + '</svg>';
   }
 
   // ---------- 共通の小物 ----------
@@ -373,7 +373,7 @@
     let html = '<ol class="cands">';
     ranked.slice(0, 6).forEach((sc, i) => {
       const r = J.BYID[sc.id];
-      html += '<li class="cand"><div class="cand-h"><span class="no">' + (i + 1) + '</span><button type="button" class="rname" data-rock="' + r.id + '">' + esc(r.name) + '</button>' + gb(r) +
+      html += '<li class="cand" data-g="' + esc(r.group) + '"><div class="cand-h"><span class="no">' + (i + 1) + '</span><button type="button" class="rname" data-rock="' + r.id + '">' + esc(r.name) + '</button>' + gb(r) +
         '<span class="pct">' + sc.pct + '%</span></div><div class="bar"><i style="width:' + sc.pct + '%"></i></div><div class="why">' + whyHtml(sc) + '</div></li>';
     });
     html += '</ol>';
@@ -441,7 +441,7 @@
     res.candidates.forEach((c, i) => {
       const rock = J.BYID[c.id];
       const rule = rock && nAns >= 2 ? J.scoreRock(rock, S.ans).pct : null;
-      html += '<li class="cand"><div class="cand-h"><span class="no">' + (i + 1) + '</span>' +
+      html += '<li class="cand" data-g="' + esc(rock ? rock.group : 'other') + '"><div class="cand-h"><span class="no">' + (i + 1) + '</span>' +
         (rock ? '<button type="button" class="rname" data-rock="' + rock.id + '">' + esc(rock.name) + '</button>' + gb(rock) : '<b>' + esc(c.name) + '</b><span class="gb" data-g="other">図鑑にない</span>') +
         '<span class="pct">' + c.confidence + '%</span></div><div class="bar"><i style="width:' + c.confidence + '%"></i></div>' +
         (rule != null ? '<div class="why"><span class="' + (rule >= 60 ? 'y' : 'n') + '">観察チェックとの一致 ' + rule + '%</span></div>' : '') +
@@ -628,7 +628,7 @@
       if (zGroup !== 'all' && zGroup !== g.id) continue;
       const rs = hits.filter((r) => r.group === g.id);
       if (!rs.length) continue;
-      html += '<div class="zgroup">' + esc(g.name) + '</div>' + rs.map((r) => '<button type="button" class="zitem" data-rock="' + r.id + '"><b>' + esc(r.name) + '</b><span class="kana">' + esc(r.kana) + '・' + esc(r.en) + '</span><p>' + esc(r.keys[0]) + '</p></button>').join('');
+      html += '<div class="zgroup" data-g="' + esc(g.id) + '">' + esc(g.name) + '<span>' + rs.length + '</span></div>' + rs.map((r) => '<button type="button" class="zitem" data-g="' + esc(r.group) + '" data-rock="' + r.id + '"><b>' + esc(r.name) + '</b><span class="kana">' + esc(r.kana) + '・' + esc(r.en) + '</span><p>' + esc(r.keys[0]) + '</p></button>').join('');
     }
     $('#zList').innerHTML = html || '<p class="empty">見つかりませんでした。</p>';
   }
