@@ -5,7 +5,7 @@
  */
 (function () {
   'use strict';
-  const APP_VERSION = '1.1.0';
+  const APP_VERSION = '1.2.0';
   const J = window.Judge, AI = window.AI;
   const LS = { key: 'ganseki.key', model: 'ganseki.model', modelCustom: 'ganseki.modelCustom', tab: 'ganseki.tab' };
   const MAX_PHOTOS = 3;
@@ -364,7 +364,7 @@
     const n = J.answered(S.ans);
     if (!n) {
       lastRanked = [];
-      box.innerHTML = '<p class="empty">観察チェックに答えると、合いそうな岩石がここに順に出ます。</p>';
+      box.innerHTML = '<div class="empty-state"><span class="es-ic i-rock"></span><p>観察チェックに答えると、合いそうな岩石がここに順に出ます。</p></div>';
       renderMini();
       return;
     }
@@ -422,7 +422,7 @@
     let html = '';
     if (S.aiErr) {
       html += '<div class="msg err">' + esc(S.aiErr.message) + '</div>';
-      if (['key', 'nokey'].includes(S.aiErr.kind)) html += '<div class="row" style="margin-top:8px"><button type="button" class="btn" data-tab-go="settings">設定タブを開く</button></div>';
+      if (['key', 'nokey'].includes(S.aiErr.kind)) html += '<div class="row" style="margin-top:8px"><button type="button" class="btn tonal ic i-key" data-tab-go="settings">設定タブを開く</button></div>';
     }
     if (!S.ai) {
       if (!S.aiErr) {
@@ -453,7 +453,7 @@
     if (res.next_checks.length) html += '<div class="next"><b>現物で確かめるとよいこと</b><ul class="ul" style="margin-left:0">' + res.next_checks.map((x) => '<li>' + esc(x) + '</li>').join('') + '</ul></div>';
     if (res.comment) html += '<p class="small">' + esc(res.comment) + '</p>';
     const nObs = unansweredObserved();
-    if (nObs) html += '<div class="row" style="margin-top:10px"><button type="button" class="btn" id="btnAiFill">AI が写真から読み取った特徴を観察チェックに入れる（' + nObs + '項目）</button></div>';
+    if (nObs) html += '<div class="row" style="margin-top:10px"><button type="button" class="btn tonal ic i-check" id="btnAiFill">AI が写真から読み取った特徴を観察チェックに入れる（' + nObs + '項目）</button></div>';
     html += '<p class="small">数字は AI がつけた確からしさの目安です。モデル：' + esc(S.ai.modelVersion || S.ai.model) + (S.ai.fellBack ? '（混雑のため切り替え）' : '') + '・' + esc(fmtDate(S.ai.at)) + '</p>';
     box.innerHTML = html;
   }
@@ -600,7 +600,7 @@
       cmp = '<div class="msg info">いま判定中の観察チェックとの一致：<b>' + sc.pct + '%</b>' +
         (sc.misses.length ? '<br>合わない点：' + sc.misses.map((m) => esc(J.optLabel(m.f, m.v))).join('、') : '') + '</div>';
     }
-    return '<div class="rk"><h1>' + esc(r.name) + '</h1><p class="sub">' + esc(r.kana) + '・' + esc(r.en) + '　' + gb(r) + '</p>' +
+    return '<div class="rk" data-g="' + esc(r.group) + '"><div class="hero"><h1>' + esc(r.name) + '</h1><p class="sub">' + esc(r.kana) + '・' + esc(r.en) + gb(r) + '</p></div>' +
       '<p>' + esc(r.desc) + '</p>' + cmp +
       '<h3>見分けのポイント</h3><ul>' + r.keys.map((k) => '<li>' + esc(k) + '</li>').join('') + '</ul>' +
       (r.similar.length ? '<h3>似ている岩石との見分け方</h3>' + r.similar.map((s) => '<button type="button" class="sim" data-rock="' + s.id + '"><b>' + esc(rockName(s.id)) + '</b><span>' + esc(s.how) + '</span></button>').join('') : '') +
@@ -654,9 +654,9 @@
     recs.sort((a, b) => String(b.at).localeCompare(String(a.at)));
     $('#recInfo').textContent = recs.length + ' 件';
     $('#recCount').textContent = recs.length ? String(recs.length) : '';
-    if (!recs.length) { $('#recList').innerHTML = '<p class="empty">まだ記録はありません。判定タブの「記録に保存」で残せます。</p>'; return; }
+    if (!recs.length) { $('#recList').innerHTML = '<div class="empty-state"><span class="es-ic i-rock"></span><b>まだ記録はありません</b><p>判定タブで石を調べて「記録に保存」を押すと、ここにたまります。</p><button type="button" class="btn primary ic i-search" data-tab-go="judge">石を判定する</button></div>'; return; }
     $('#recList').innerHTML = recs.map((r) => {
-      let img = '<span class="noimg"></span>';
+      let img = '<span class="noimg"><span class="es-ic i-rock"></span></span>';
       if (r.photos && r.photos[0]) { const u = URL.createObjectURL(r.photos[0]); recUrls.push(u); img = '<img src="' + u + '" alt="">'; }
       const where = (r.place && r.place.text) || (r.geo && !r.geo.none ? r.geo.lith : '') || '';
       return '<button type="button" class="rec" data-rec="' + esc(r.id) + '">' + img + '<div><b>' + esc(recTitle(r)) + '</b><span>' + esc(fmtDate(r.at)) + (where ? '・' + esc(where) : '') + '</span></div></button>';
@@ -673,8 +673,8 @@
     return photos +
       '<label class="field" for="recFinal">自分の判定</label><input id="recFinal" list="rockNames" value="' + esc((rec.final && rec.final.name) || '') + '" autocomplete="off">' +
       '<label class="field" for="recMemo">メモ</label><textarea id="recMemo">' + esc(rec.memo || '') + '</textarea>' +
-      '<div class="row" style="margin-top:8px"><button type="button" class="btn primary" id="recSave">直した内容を保存</button>' +
-      (rec.final && rec.final.id ? '<button type="button" class="btn" data-rock="' + rec.final.id + '">図鑑で見る</button>' : '') + '</div>' +
+      '<div class="row" style="margin-top:8px"><button type="button" class="btn primary ic i-save" id="recSave">直した内容を保存</button>' +
+      (rec.final && rec.final.id ? '<button type="button" class="btn ic i-book" data-rock="' + rec.final.id + '">図鑑で見る</button>' : '') + '</div>' +
       '<div class="rk"><h3>日時・場所</h3><dl class="kv"><dt>日時</dt><dd>' + esc(fmtDate(rec.at)) + '</dd>' +
       (p.text ? '<dt>産地メモ</dt><dd>' + esc(p.text) + '</dd>' : '') +
       (p.lat != null ? '<dt>緯度経度</dt><dd>' + p.lat.toFixed(5) + ', ' + p.lon.toFixed(5) + '　<a href="' + geoLink(p.lat, p.lon) + '" target="_blank" rel="noopener">地理院地図</a></dd>' : '') +
@@ -682,7 +682,7 @@
       (ai ? '<h3>AI の判定</h3><ol>' + ai.candidates.map((c) => '<li>' + esc(c.name) + '　' + c.confidence + '%</li>').join('') + '</ol>' + (ai.comment ? '<p class="small">' + esc(ai.comment) + '</p>' : '') : '') +
       (rec.rule && rec.rule.length ? '<h3>観察からの候補</h3><ol>' + rec.rule.slice(0, 3).map((x) => '<li>' + esc(rockName(x.id)) + '　' + x.pct + '%</li>').join('') + '</ol>' : '') +
       (ansRows ? '<h3>観察チェックの答え</h3><dl class="kv">' + ansRows + '</dl>' : '') + '</div>' +
-      '<div class="row" style="margin-top:18px"><button type="button" class="btn" id="recLoad">判定画面に読み込む</button><button type="button" class="btn danger" id="recDel">この記録を消す</button></div>';
+      '<div class="row" style="margin-top:18px"><button type="button" class="btn ic i-up" id="recLoad">判定画面に読み込む</button><button type="button" class="btn danger ic i-trash" id="recDel">この記録を消す</button></div>';
   }
   async function openRecord(id) {
     let rec;
