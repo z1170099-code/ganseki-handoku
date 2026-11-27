@@ -34,6 +34,17 @@ AI_RESULT = {
     "next_checks": ["希塩酸をかけて泡が出るか確かめる", "ルーペでかんらん石（黄緑の粒）をさがす"],
     "comment": "斑状組織と灰色の石基から、安山岩の可能性が高い。",
 }
+MINERAL_RESULT = {
+    "is_rock": True, "subject": "mineral", "photo_note": "",
+    "observed": {"fabric": "unknown", "color": "unknown", "luster": "unknown", "minerals": []},
+    "candidates": [
+        {"id": "mineral", "kind": "mineral", "name": "黄鉄鉱（pyrite）", "confidence": 70, "props": "硬度 6〜6.5・条痕 緑がかった黒・金属光沢・立方体の結晶",
+         "reasons": ["真ちゅう色で金属光沢の立方体"], "against": []},
+        {"id": "mineral", "kind": "mineral", "name": "黄銅鉱（chalcopyrite）", "confidence": 15, "props": "硬度 3.5〜4・条痕 緑がかった黒", "reasons": ["金色の金属光沢"], "against": ["結晶が立方体"]},
+    ],
+    "next_checks": ["白い陶器の裏にこすって粉の色（条痕）を見る"],
+    "comment": "立方体の結晶と金属光沢から黄鉄鉱の可能性が高い。",
+}
 LEGEND = {"symbol": "N2_sbs", "r": 255, "g": 250, "b": 130, "formationAge_ja": "新生代 新第三紀 中新世", "group_ja": "堆積岩",
           "lithology_ja": "汽水成層ないし海成・非海成混合層 砂岩，砂岩泥岩互層"}
 
@@ -101,7 +112,8 @@ class Gemini:
                           body=json.dumps({"candidates": [{"content": {"parts": [{"text": "OK"}]}, "finishReason": "STOP"}]}))
             return
         model = request.url.split("/models/")[1].split(":")[0]
-        route.fulfill(status=200, headers=CORS, content_type="application/json; charset=utf-8", body=gem_body(AI_RESULT, model + "-test"))
+        res = MINERAL_RESULT if self.mode == "mineral" else AI_RESULT
+        route.fulfill(status=200, headers=CORS, content_type="application/json; charset=utf-8", body=gem_body(res, model + "-test"))
 
 
 def gbank(route, request):
@@ -124,6 +136,11 @@ def watch(page, logs):
 
 def ready(page):
     page.wait_for_function("window.__gansekiReady === true", timeout=30000)
+
+
+def detail_mode(page):
+    """観察の質問を「くわしく」にする（はじめは「かんたん」）"""
+    page.click('#obsMode [data-mode="detail"]')
 
 
 def chip(page, f, v):
@@ -186,6 +203,15 @@ def run_pc(br, base, photo):
     pg.goto(base); ready(pg)
     check(sc, "起動してエラーなし", not errs(logs), errs(logs)[:3])
     check(sc, "版の表示", pg.inner_text("#ver").startswith("v"), pg.inner_text("#ver"))
+    check(sc, "はじめは「かんたん」の質問が6個", pg.locator("#obsEasy .q").count() == 6 and pg.locator("#obsEasy").is_visible() and pg.locator("#obsForm").is_hidden(),
+          pg.locator("#obsEasy .q").count())
+    pg.click('#obsEasy .chip[data-f="color"][data-v="dark"]')
+    st = pg.evaluate("[window.__ganseki.S.ans.color, document.querySelector('#obsForm .chip[data-f=color][data-v=dark]').getAttribute('aria-pressed')]")
+    check(sc, "「かんたん」の答えが「くわしく」にも入る", st == ["dark", "true"], st)
+    check(sc, "「かんたん」だけでも候補が出る", len(top_rule(pg)) > 0, top_rule(pg)[:3])
+    pg.click('#obsEasy .chip[data-f="color"][data-v="dark"]')
+    detail_mode(pg)
+    check(sc, "「くわしく」に切り替えられて、覚えている", pg.locator("#obsForm").is_visible() and pg.evaluate("localStorage.getItem('ganseki.obsMode')") == "detail")
     check(sc, "観察チェックの項目が12個", pg.locator("#obsForm .q").count() == 12, pg.locator("#obsForm .q").count())
     check(sc, "模式図が描かれている（組織・礫・面構造）", pg.locator("#obsForm .chips.tiles svg").count() == 17, pg.locator("#obsForm .chips.tiles svg").count())
 
@@ -298,7 +324,18 @@ def run_pc(br, base, photo):
     check(sc, "存在しない鉱物コードは入らない", "zzz" not in pressed.get("min", []), pressed.get("min"))
     tops = top_rule(pg)
     check(sc, "入れたあと観察の1位も安山岩", tops[:1] == ["安山岩"], tops[:3])
-    check(sc, "AI の候補に観察チェックとの一致が出る", "観察チェックとの一致" in pg.inner_text("#aiBox"))
+    check(sc, "AI の候補に観察チェックとの一致が出る", "質問の答えとの一致" in pg.inner_text("#aiBox"))
+    check(sc, "依頼文と JSON の形に鉱物の判定が入る", "鉱物のとき" in prompt and "subject" in c0["body"]["generationConfig"]["responseSchema"]["properties"])
+
+    # 鉱物の写真
+    gem.mode = "mineral"
+    pg.click("#btnAi")
+    pg.wait_for_function("document.querySelector('#aiBox').innerText.includes('黄鉄鉱')", timeout=20000)
+    txt = pg.inner_text("#aiBox")
+    check(sc, "鉱物の写真は鉱物として答える（性質つき）", "鉱物として判定しました" in txt and "黄鉄鉱（pyrite）" in txt and "条痕" in txt and pg.locator('#aiBox .gb[data-g="mineral"]').count() == 2, txt[:160])
+    gem.mode = "ok"
+    pg.click("#btnAi")
+    pg.wait_for_function("document.querySelector('#aiBox').innerText.includes('安山岩')", timeout=20000)
 
     # キーの誤り
     gem.mode = "badkey"
@@ -384,6 +421,9 @@ def run_phone(br, base):
     wide = pg.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
     check(sc, "横にはみ出さない（判定）", wide <= 0, wide)
     pg.screenshot(path=os.path.join(OUT, "phone_judge_top.png"))
+    pg.locator("#secObs").scroll_into_view_if_needed()
+    pg.screenshot(path=os.path.join(OUT, "phone_easy.png"))
+    pg.tap('#obsMode [data-mode="detail"]')
     for f, v in [("fabric", "crystalline"), ("grain", "coarse"), ("color", "speckled"), ("min", "qtz"), ("min", "kfs"), ("min", "bt")]:
         pg.tap(f'#obsForm .chip[data-f="{f}"][data-v="{v}"]')
     pg.locator("#q-hard").scroll_into_view_if_needed()
@@ -423,6 +463,7 @@ def run_offline(br, base):
     ctx.set_offline(True)
     pg.reload(); ready(pg)
     check(sc, "電波がなくても開ける", pg.locator("#obsForm .chip").count() > 50)
+    detail_mode(pg)
     chip(pg, "acid", "fizz")
     check(sc, "電波がなくても観察チェックが動く", len(top_rule(pg)) > 0, top_rule(pg)[:3])
     pg.click('#tabs [data-tab="zukan"]')

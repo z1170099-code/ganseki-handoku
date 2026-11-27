@@ -1,6 +1,7 @@
 /* 岩石判読：AI（Gemini）と外部データ
  * - 写真を縮める（長い辺 1280px の JPEG）
  * - Gemini に写真と観察を送り、候補を JSON で受け取る（混雑・回数切れのときは軽いモデルでやり直す）
+ *   写真の主役が鉱物（水晶・黄鉄鉱など）なら、鉱物の候補を返してもらう（subject = mineral）
  * - 位置から 20万分の1日本シームレス地質図 V2 の凡例を引く（産総研 地質調査総合センター）
  * - 写真の位置情報（EXIF の GPS）を読む
  * API キーは呼び出し側（app.js）が端末の localStorage から渡す。ここには書かない。
@@ -116,6 +117,7 @@
     type: 'OBJECT',
     properties: {
       is_rock: { type: 'BOOLEAN' },
+      subject: { type: 'STRING', enum: ['rock', 'mineral', 'fossil', 'other'] },
       photo_note: { type: 'STRING' },
       observed: {
         type: 'OBJECT',
@@ -132,7 +134,9 @@
           properties: {
             id: { type: 'STRING' },
             name: { type: 'STRING' },
+            kind: { type: 'STRING', enum: ['rock', 'mineral', 'other'] },
             confidence: { type: 'INTEGER' },
+            props: { type: 'STRING' },
             reasons: { type: 'ARRAY', items: { type: 'STRING' } },
             against: { type: 'ARRAY', items: { type: 'STRING' } },
           },
@@ -148,16 +152,20 @@
   function buildPrompt(input) {
     const J = window.Judge;
     const L = [];
-    L.push('あなたは日本の大学で岩石学を教えている教員です。写真の岩石（手標本または露頭）を、肉眼とルーペで観察できる範囲で判定してください。');
+    L.push('あなたは日本の大学で岩石学・鉱物学を教えている教員です。写真の石（岩石の手標本・露頭、または鉱物の標本）を、肉眼とルーペで観察できる範囲で判定してください。');
     L.push('');
     L.push('# 守ること');
     L.push('- 写真に実際に見える特徴だけを根拠にする。写真ではわからない性質（硬さ・塩酸との反応・重さ・磁性）は、下の「利用者の観察」にあればそれを使い、なければ next_checks に回す。');
     L.push('- candidates は可能性の高い順に最大5つ。confidence は 0〜100 の整数で、合計が100を超えないようにする。写真だけで決めきれないときは、高い数字をつけない。');
-    L.push('- candidates の id は下の「岩石リスト」の id を使う。リストにない岩石なら id を "other" にして name に岩石名を書く。鉱物の単体・化石だけ・人工物（コンクリート・れんが・スラグなど）のときも "other"。');
-    L.push('- is_rock は、写真の主役が岩石（または岩石のかけら）なら true。');
+    L.push('- subject は写真の主役：岩石なら "rock"、鉱物の結晶や鉱物の塊（水晶・黄鉄鉱・方解石・蛍石・ざくろ石など）なら "mineral"、化石が主役なら "fossil"、石でない物（人工物など）なら "other"。');
+    L.push('- 岩石のとき：candidates の id は下の「岩石リスト」の id を使い、kind は "rock"。リストにない岩石なら id を "other" にして name に岩石名を書く。人工物（コンクリート・れんが・スラグなど）も id "other"、kind "other"。');
+    L.push('- 鉱物のとき：candidates は鉱物にし、id は "mineral"、kind は "mineral"、name は「和名（英名）」の形（例：石英（quartz）、黄鉄鉱（pyrite））。宝石名より鉱物名を使う（例：紫水晶 → 石英（紫水晶））。');
+    L.push('- 鉱物の候補には props に、見分けに使う性質を短く書く：モース硬度・条痕の色・光沢・へき開や割れ方・結晶の形・比重の感じ（例：「硬度 7・条痕 白・ガラス光沢・へき開なし・六角柱状」）。岩石の候補では props は空でよい。');
+    L.push('- is_rock は、写真の主役が岩石・鉱物・化石なら true、それ以外は false。');
     L.push('- reasons（根拠）と against（合わない点・不確かな点）は、写真のどこに何が見えるかを具体的に、短い日本語の文で書く。');
     L.push('- observed には、写真から読み取れた特徴を下の「観察の選択肢」のコードで入れる。判断できない項目は "unknown"。minerals は見えた鉱物のコードの配列（なければ空）。');
-    L.push('- next_checks には、候補をしぼるために利用者が現物で確かめるとよいことを2〜4個（例：希塩酸をかけて泡が出るか、鉄くぎで傷がつくか、ルーペで割ったばかりの面の粒を見る）。');
+    L.push('- next_checks には、候補をしぼるために利用者が現物で確かめるとよいことを2〜4個。家にある物で一般の人にもできる方法を優先する（例：鉄くぎで傷がつくか、酢をかけて泡が出るか、白い陶器の裏（素焼きの所）にこすって粉の色〔条痕〕を見る、磁石につくか、ルーペで割ったばかりの面の粒を見る）。');
+    L.push('- observed は岩石の観察の選択肢なので、鉱物のときは判断できる項目（color・luster など）だけ入れ、ほかは "unknown"。');
     L.push('- photo_note には、写真の撮り方で判定しにくかった点があれば一言（ピンぼけ・風化面だけ・大きさがわからない など）。なければ空。');
     L.push('- comment には、判定全体についての短いまとめや注意（1〜2文）。');
     L.push('- 日本語で書く。岩石学の用語は正確に使ってよい。');
@@ -244,8 +252,10 @@
   // 答えを整える：存在しないコードを捨て、岩石 id を図鑑に結びつける
   function normalize(res) {
     const J = window.Judge;
+    const subj = ['rock', 'mineral', 'fossil', 'other'].includes(res.subject) ? res.subject : (res.is_rock === false ? 'other' : 'rock');
     const out = {
-      is_rock: res.is_rock !== false,
+      is_rock: res.is_rock !== false && subj !== 'other',
+      subject: subj,
       photo_note: String(res.photo_note || ''),
       comment: String(res.comment || ''),
       observed: {},
@@ -257,14 +267,17 @@
     if (Array.isArray(ob.minerals)) out.observed.min = ob.minerals.filter((m) => J.optOf('min', m) && m !== 'none');
     const seen = new Set();
     for (const c of Array.isArray(res.candidates) ? res.candidates : []) {
-      let rock = J.BYID[c.id] || J.findRock(c.name);
+      const kind = ['rock', 'mineral', 'other'].includes(c.kind) ? c.kind : (c.id === 'mineral' ? 'mineral' : 'rock');
+      let rock = kind === 'mineral' ? null : (J.BYID[c.id] || J.findRock(c.name));
       const id = rock ? rock.id : 'other';
-      const key = rock ? id : 'other:' + c.name;
+      const key = rock ? id : kind + ':' + c.name;
       if (seen.has(key)) continue;
       seen.add(key);
       out.candidates.push({
-        id,
+        id: rock ? id : (kind === 'mineral' ? 'mineral' : 'other'),
         name: rock ? rock.name : String(c.name || '（名前なし）'),
+        kind: rock ? 'rock' : kind,
+        props: kind === 'mineral' ? String(c.props || '') : '',
         confidence: Math.max(0, Math.min(100, Math.round(Number(c.confidence) || 0))),
         reasons: (Array.isArray(c.reasons) ? c.reasons : []).map(String).filter(Boolean),
         against: (Array.isArray(c.against) ? c.against : []).map(String).filter(Boolean),

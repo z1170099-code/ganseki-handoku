@@ -5,9 +5,9 @@
  */
 (function () {
   'use strict';
-  const APP_VERSION = '1.2.0';
+  const APP_VERSION = '1.3.0';
   const J = window.Judge, AI = window.AI;
-  const LS = { key: 'ganseki.key', model: 'ganseki.model', modelCustom: 'ganseki.modelCustom', tab: 'ganseki.tab' };
+  const LS = { key: 'ganseki.key', model: 'ganseki.model', modelCustom: 'ganseki.modelCustom', tab: 'ganseki.tab', obsMode: 'ganseki.obsMode' };
   const MAX_PHOTOS = 3;
 
   const $ = (s, el) => (el || document).querySelector(s);
@@ -219,6 +219,141 @@
   }
 
   // ---------- 共通の小物 ----------
+  // 岩石の絵：データ（つくり・色・縞・鉱物）から、その岩石らしい模式図を描く（写真ではない）
+  const ART_PAL = {
+    light: ['#e9e4dc', '#d8d1c6', '#f8f6f2', '#b9b0a3'], speckled: ['#d9d4cc', '#c4bdb2', '#f6f3ee', '#2e2a27'],
+    gray: ['#8f8a84', '#7c7771', '#b0aba5', '#56514c'], dark: ['#3f3b38', '#34312e', '#615c57', '#1c1a18'],
+    green: ['#5d7158', '#4d5f49', '#86a07f', '#34423a'], red: ['#9a5b48', '#86493a', '#c08a72', '#5a3127'],
+    blue: ['#6b7486', '#5a6374', '#929bac', '#434a58'],
+  };
+  const ART_SWATCH = { light: '#ebe6de', speckled: 'linear-gradient(135deg,#f3f0ea 0 50%,#2e2a27 50%)', gray: '#8f8a84', dark: '#34312e', green: '#5d7158', red: '#9a5b48', blue: '#6b7486' };
+  function topCode(p) { if (!p) return ''; const t = String(p).split(/\s+/).find((x) => /:2$/.test(x)) || String(p).split(/\s+/)[0] || ''; return t.split(':')[0]; }
+  function artKind(r) {
+    const raw = r.p || {};
+    const st = topCode(raw.struct), fab = topCode(raw.fabric), gr = topCode(raw.grain);
+    if ((r.group === 'metamorphic' || r.group === 'fault') && st && st !== 'none') return 'struct:' + st;
+    if (fab === 'massive' && gr === 'glass') return 'glass';
+    if (fab === 'clastic') return 'clast:' + (topCode(raw.clast) === 'angular' ? 'angular' : topCode(raw.clast) === 'round' ? 'round' : 'sand');
+    if (st === 'bedding' && (fab === 'massive' || !fab)) return 'struct:bedding';
+    if (st === 'flow' && r.group !== 'plutonic') return fab === 'pyroclastic' ? 'fabric:pyroclastic' : 'struct:flow';
+    return 'fabric:' + (fab || 'massive');
+  }
+  const artCache = {};
+  function rockArt(r) {
+    if (!r) return '';
+    if (artCache[r.id]) return artCache[r.id];
+    const W = 120, H = 80, R = rng(hash('art:' + r.id));
+    const rnd = (a, b) => a + (b - a) * R();
+    const pick = (a) => a[Math.floor(R() * a.length)];
+    const f1 = (n) => n.toFixed(1);
+    const raw = r.p || {};
+    const col = topCode(raw.color) || 'gray';
+    const P = ART_PAL[col] || ART_PAL.gray;
+    const mins = String(raw.min || '').split(/\s+/).map((x) => x.split(':')[0]);
+    let g = '';
+    const bg = (c) => { g += '<rect width="' + W + '" height="' + H + '" fill="' + c + '"/>'; };
+    const dots = (n, cols, r0, r1) => { for (let i = 0; i < n; i++) g += '<circle cx="' + f1(rnd(0, W)) + '" cy="' + f1(rnd(0, H)) + '" r="' + rnd(r0, r1).toFixed(2) + '" fill="' + pick(cols) + '"/>'; };
+    const poly = (pts, c, extra) => { g += '<polygon points="' + pts.map((p) => f1(p[0]) + ',' + f1(p[1])).join(' ') + '" fill="' + c + '"' + (extra || '') + '/>'; };
+    const shard = (cx, cy, s, c) => { const n = 3 + Math.floor(R() * 3), a0 = rnd(0, 6.28), pts = []; for (let i = 0; i < n; i++) { const a = a0 + (i / n) * 6.28 + rnd(-0.3, 0.3); pts.push([cx + Math.cos(a) * s * rnd(0.6, 1.1), cy + Math.sin(a) * s * rnd(0.6, 1.1)]); } poly(pts, c); };
+    const wave = (y, amp, fr, ph, c, w) => { let d = 'M0,' + f1(y); for (let x = 4; x <= W; x += 4) d += ' L' + x + ',' + f1(y + amp * Math.sin(x * fr + ph)); g += '<path d="' + d + '" stroke="' + c + '" stroke-width="' + f1(w) + '" fill="none"/>'; };
+    const lath = (c, w0, w1) => { const x = rnd(2, W - 10), y = rnd(2, H - 6), w = rnd(w0, w1), h = w * rnd(0.3, 0.45); g += '<rect x="' + f1(x) + '" y="' + f1(y) + '" width="' + f1(w) + '" height="' + f1(h) + '" fill="' + c + '" transform="rotate(' + f1(rnd(-60, 60)) + ' ' + f1(x + w / 2) + ' ' + f1(y + h / 2) + ')"/>'; };
+    const kind = artKind(r);
+    switch (kind) {
+      case 'fabric:crystalline': {
+        const nx = 10, ny = 7, Q = [];
+        for (let i = 0; i <= nx; i++) { Q[i] = []; for (let j = 0; j <= ny; j++) Q[i][j] = [i * W / nx + (i % nx ? rnd(-4, 4) : 0), j * H / ny + (j % ny ? rnd(-4, 4) : 0)]; }
+        let cols;
+        if (col === 'light' || col === 'speckled') cols = ['#f4f1ec', '#fbfaf7', '#ddd7ce', '#2f2a26', '#3a3430', '#efe9df'].concat(mins.includes('kfs') && col === 'light' ? ['#e7bea2', '#e2b294'] : []);
+        else cols = [P[0], P[1], P[2], P[3], P[3], '#f1ede6'];
+        for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) poly([Q[i][j], Q[i + 1][j], Q[i + 1][j + 1], Q[i][j + 1]], pick(cols), ' stroke="rgba(0,0,0,.18)" stroke-width=".5"');
+        break;
+      }
+      case 'fabric:porphyritic':
+        bg(P[0]); dots(260, [P[1], P[2], P[0]], 0.3, 0.8);
+        for (let i = 0; i < 12; i++) lath(col === 'light' ? '#ffffff' : '#f3efe7', 7, 14);
+        for (let i = 0; i < 6; i++) lath(col === 'dark' ? '#14110f' : '#1e1b19', 3, 6);
+        break;
+      case 'clast:round': case 'clast:angular': case 'clast:sand': {
+        const sand = col === 'light' ? '#d9ccb3' : col === 'red' ? '#a86e58' : col === 'green' ? '#7b8a6e' : col === 'dark' ? '#55504b' : '#b5aa98';
+        bg(sand); dots(260, ['rgba(0,0,0,.12)', 'rgba(255,255,255,.18)'], 0.3, 0.8);
+        const cc = ['#8e8a85', '#6f6a63', '#b8b0a4', '#ebe5da', '#9a7258', '#4d4844'];
+        if (kind === 'clast:round') for (let i = 0; i < 13; i++) { const rx = rnd(5, 11), cx = rnd(4, W - 4), cy = rnd(4, H - 4); g += '<ellipse cx="' + f1(cx) + '" cy="' + f1(cy) + '" rx="' + f1(rx) + '" ry="' + f1(rx * rnd(0.6, 0.9)) + '" fill="' + pick(cc) + '" transform="rotate(' + f1(rnd(0, 180)) + ' ' + f1(cx) + ' ' + f1(cy) + ')"/>'; }
+        else if (kind === 'clast:angular') for (let i = 0; i < 14; i++) shard(rnd(5, W - 5), rnd(5, H - 5), rnd(5, 11), pick(cc));
+        else dots(220, ['rgba(255,255,255,.35)', 'rgba(0,0,0,.25)'], 0.5, 1.1);
+        break;
+      }
+      case 'fabric:vesicular':
+        bg(P[0]); dots(120, [P[1], P[2]], 0.3, 0.9); dots(34, [P[3], 'rgba(0,0,0,.55)'], 1.5, 5.5);
+        break;
+      case 'fabric:pyroclastic':
+        bg(col === 'dark' ? '#5a544e' : col === 'green' ? '#8fa38a' : '#d8d0bf'); dots(200, ['rgba(0,0,0,.1)', 'rgba(255,255,255,.2)'], 0.3, 0.7);
+        for (let i = 0; i < 14; i++) shard(rnd(4, W - 4), rnd(4, H - 4), rnd(3, 8), pick(['#f6f3ec', '#5a5550', '#9b8f7c', '#7d6a57', '#2b2724']));
+        break;
+      case 'glass':
+        g += '<defs><linearGradient id="gl' + r.id + '" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4a4744"/><stop offset=".45" stop-color="#121110"/><stop offset="1" stop-color="#26231f"/></linearGradient></defs><rect width="' + W + '" height="' + H + '" fill="url(#gl' + r.id + ')"/>';
+        for (let i = 0; i < 5; i++) g += '<path d="M' + f1(rnd(10, 60)) + ',' + f1(rnd(10, 70)) + ' q' + f1(rnd(15, 30)) + ',' + f1(rnd(-20, -5)) + ' ' + f1(rnd(30, 55)) + ',' + f1(rnd(-5, 10)) + '" stroke="rgba(255,255,255,' + rnd(0.1, 0.25).toFixed(2) + ')" stroke-width="' + f1(rnd(0.6, 1.6)) + '" fill="none"/>';
+        break;
+      case 'struct:bedding': {
+        let y = 0; const cols = [P[0], P[1], P[2], P[0], P[3]];
+        while (y < H) { const h = rnd(5, 14); g += '<rect x="0" y="' + f1(y) + '" width="' + W + '" height="' + f1(h + 0.6) + '" fill="' + pick(cols) + '"/>'; y += h; }
+        dots(160, ['rgba(0,0,0,.14)', 'rgba(255,255,255,.18)'], 0.3, 0.8);
+        break;
+      }
+      case 'struct:flow':
+        bg(P[0]);
+        for (let i = 0; i < 12; i++) wave(3 + i * 7 + rnd(-1, 1), rnd(2, 4), 0.06 + rnd(0, 0.03), rnd(0, 6), pick([P[1], P[2], P[3]]), rnd(1, 3));
+        break;
+      case 'struct:slaty':
+        bg(col === 'light' ? '#8a8e93' : '#3e4145');
+        for (let x = -H; x < W + H; x += 3) g += '<line x1="' + x + '" y1="0" x2="' + (x + H * 0.35) + '" y2="' + H + '" stroke="rgba(255,255,255,' + (x % 2 ? '.06' : '.12') + ')" stroke-width="1"/>';
+        break;
+      case 'struct:phyllitic':
+        bg(col === 'green' ? '#5d6b5c' : '#55595d');
+        for (let y = 2; y < H; y += 3.4) { let d = 'M0,' + f1(y); for (let x = 2; x <= W; x += 2) d += ' L' + x + ',' + f1(y + ((x / 2) % 2 ? 0.9 : -0.9)); g += '<path d="' + d + '" stroke="rgba(255,255,255,' + rnd(0.15, 0.4).toFixed(2) + ')" stroke-width=".7" fill="none"/>'; }
+        break;
+      case 'struct:schistose':
+        bg(P[1]);
+        for (let i = 0; i < 120; i++) { const x = rnd(-6, W), y = rnd(0, H); g += '<ellipse cx="' + f1(x) + '" cy="' + f1(y) + '" rx="' + f1(rnd(4, 10)) + '" ry="' + f1(rnd(0.7, 1.6)) + '" fill="' + pick([P[0], P[2], P[3], '#d9ddd6']) + '" transform="rotate(-8 ' + f1(x) + ' ' + f1(y) + ')"/>'; }
+        dots(24, ['#ffffff'], 0.3, 0.7);
+        break;
+      case 'struct:gneissic': {
+        let y = -3, k = 0;
+        while (y < H + 5) { const h = rnd(4, 10); let d = 'M0,' + f1(y); for (let x = 4; x <= W; x += 4) d += ' L' + x + ',' + f1(y + 2 * Math.sin(x * 0.07 + y)); g += '<path d="' + d + '" stroke="' + (k++ % 2 ? '#34302d' : '#ece6dc') + '" stroke-width="' + f1(h) + '" fill="none"/>'; y += h * 0.95; }
+        break;
+      }
+      case 'struct:sheared': {
+        bg(P[1]);
+        const A = [[35, 28], [85, 52]];
+        for (let y0 = 1; y0 < H; y0 += 3) {
+          let d = '';
+          for (let x = 0; x <= W; x += 3) { let y = y0; for (const [ax, ay] of A) y += (y0 > ay ? 1 : -1) * 7 * Math.exp(-((x - ax) * (x - ax)) / 140) * Math.exp(-((y0 - ay) * (y0 - ay)) / 90); d += (x ? ' L' : 'M') + x + ',' + f1(y); }
+          g += '<path d="' + d + '" stroke="' + pick([P[3], P[2], P[0]]) + '" stroke-width="1" fill="none"/>';
+        }
+        for (const [ax, ay] of A) g += '<path d="M' + (ax - 13) + ',' + (ay + 3) + ' Q' + ax + ',' + (ay - 8) + ' ' + (ax + 13) + ',' + (ay - 3) + ' Q' + ax + ',' + (ay + 8) + ' ' + (ax - 13) + ',' + (ay + 3) + 'Z" fill="#f2ede4"/>';
+        break;
+      }
+      default: // 緻密・特徴なし
+        bg(P[0]); dots(200, [P[1], P[2]], 0.3, 1);
+    }
+    if (mins.includes('grt')) dots(7, ['#a3242c', '#8c1d25'], 1.4, 2.6);
+    if (mins.includes('ol') && kind !== 'fabric:crystalline') dots(6, ['#a9b545', '#8f9c35'], 1.2, 2.2);
+    if (mins.includes('fossil')) for (let i = 0; i < 3; i++) { const x = rnd(15, W - 15), y = rnd(15, H - 15), s = rnd(4, 7); g += '<path d="M' + f1(x - s) + ',' + f1(y) + ' a' + f1(s) + ',' + f1(s * 0.8) + ' 0 0 1 ' + f1(2 * s) + ',0 z" fill="rgba(255,255,255,.75)" stroke="rgba(0,0,0,.25)" stroke-width=".6"/>'; }
+    // 光の当たり方（上が明るく、下が暗い）
+    g += '<rect width="' + W + '" height="' + H + '" fill="url(#shade)"/>';
+    const out = '<svg class="art" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false"><defs><linearGradient id="shade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".14"/><stop offset=".55" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".22"/></linearGradient></defs>' + g + '</svg>';
+    artCache[r.id] = out;
+    return out;
+  }
+
+  function thumb(rock, i, kind) {
+    const art = rock ? rockArt(rock) : kind === 'mineral' ? mineralArt() : '<svg class="art" viewBox="0 0 120 80" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false"><rect width="120" height="80" fill="#8a847d"/><text x="60" y="54" font-size="40" font-weight="700" text-anchor="middle" fill="#fff" fill-opacity=".75">?</text></svg>';
+    return '<button type="button" class="thumb"' + (rock ? ' data-rock="' + rock.id + '"' : ' disabled') + ' tabindex="-1" aria-hidden="true">' + art + '<span class="no">' + (i + 1) + '</span></button>';
+  }
+  function mineralArt() {
+    return '<svg class="art" viewBox="0 0 120 80" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false"><defs><linearGradient id="mbg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3b4a57"/><stop offset="1" stop-color="#1d2630"/></linearGradient></defs><rect width="120" height="80" fill="url(#mbg)"/>' +
+      '<path d="M60 10 L74 22 L74 60 L60 72 L46 60 L46 22Z" fill="#cfe3ee" fill-opacity=".9"/><path d="M60 10 L74 22 L60 30 L46 22Z" fill="#fff" fill-opacity=".9"/><path d="M60 30 L74 22 L74 60 L60 72Z" fill="#9fc0d3"/>' +
+      '<path d="M36 34 L44 41 L44 64 L36 70 L28 64 L28 41Z" fill="#b8d3e2" fill-opacity=".8"/><path d="M84 30 L92 37 L92 62 L84 68 L76 62 L76 37Z" fill="#b8d3e2" fill-opacity=".7"/></svg>';
+  }
   function gb(rock) { return '<span class="gb" data-g="' + esc(rock.group) + '">' + esc(rock.groupName) + '</span>'; }
   function rockName(id) { const r = J.BYID[id]; return r ? r.name : id; }
 
@@ -329,14 +464,58 @@
     $('#obsForm').innerHTML = html;
     updateChips();
   }
+  // 「かんたん」の質問（rocks.js の easy）。選択肢のコードは「くわしく」と同じなので、答えは両方に入る
+  function grainPic(v) {
+    const W = 72, H = 48, R = rng(hash('grain:' + v)), rr = (a, b) => a + (b - a) * R();
+    let g = '<rect width="72" height="48" fill="#cfc8bd"/>';
+    if (v === 'glass') g = '<defs><linearGradient id="gg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5a5652"/><stop offset=".5" stop-color="#151311"/><stop offset="1" stop-color="#2a2622"/></linearGradient></defs><rect width="72" height="48" fill="url(#gg)"/><path d="M8,34 q18,-16 40,-12" stroke="rgba(255,255,255,.3)" stroke-width="1.6" fill="none"/><path d="M20,42 q16,-10 34,-8" stroke="rgba(255,255,255,.15)" stroke-width="1" fill="none"/>';
+    else {
+      const sz = v === 'coarse' ? [3.2, 5.5, 26] : v === 'medium' ? [1.2, 2, 150] : [0.35, 0.6, 700];
+      const cols = ['#f4f1ec', '#2f2a26', '#a59c90', '#e8dccb', '#6d665f'];
+      for (let i = 0; i < sz[2]; i++) g += '<circle cx="' + rr(0, W).toFixed(1) + '" cy="' + rr(0, H).toFixed(1) + '" r="' + rr(sz[0], sz[1]).toFixed(2) + '" fill="' + cols[Math.floor(R() * cols.length)] + '"/>';
+    }
+    return '<svg viewBox="0 0 72 48" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">' + g + '</svg>';
+  }
+  function easyPic(e, v) {
+    if (e.kind === 'pics') return illus(e.f, v);
+    if (e.kind === 'grain') return grainPic(v);
+    if (e.kind === 'swatch') return '<i class="sw" style="background:' + (ART_SWATCH[v] || '#999') + '"></i>';
+    return '';
+  }
+  function buildEasy() {
+    const list = window.ROCKS_DB.easy || [];
+    $('#obsEasy').innerHTML = list.map((e, i) => '<div class="q eq" id="qe-' + e.f + '"><div class="eq-h"><span class="eq-no">' + (i + 1) + '</span><b>' + esc(e.q) + '</b></div>' +
+      (e.help ? '<p class="eq-help">' + esc(e.help) + '</p>' : '') + '<div class="chips e-' + e.kind + '">' +
+      Object.entries(e.opts).map(([v, lab]) => '<button type="button" class="chip" data-f="' + e.f + '" data-v="' + v + '" aria-pressed="false">' + easyPic(e, v) +
+        '<span>' + esc(lab[0]) + '<em class="mk"></em>' + (lab[1] ? '<small>' + esc(lab[1]) + '</small>' : '') + '</span></button>').join('') +
+      '</div></div>').join('');
+  }
+  let obsMode = 'easy';
+  function setObsMode(m) {
+    obsMode = m === 'detail' ? 'detail' : 'easy';
+    lsSet(LS.obsMode, obsMode === 'easy' ? '' : obsMode);
+    $('#obsEasy').hidden = obsMode !== 'easy';
+    $('#obsForm').hidden = obsMode === 'easy';
+    for (const b of $$('#obsMode button')) b.setAttribute('aria-pressed', String(b.dataset.mode === obsMode));
+    updateObsNote();
+  }
+  function updateObsNote() {
+    const el = $('#obsNote');
+    if (!el) return;
+    const easyF = new Set((window.ROCKS_DB.easy || []).map((e) => e.f));
+    const n = J.F.filter((f) => !easyF.has(f.id) && !J.isEmpty(S.ans[f.id])).length;
+    el.textContent = obsMode === 'easy' && n ? '「くわしく」で ' + n + ' 項目にも答えています（判定に入っています）。' : '';
+    el.hidden = !el.textContent;
+  }
   function updateChips() {
-    for (const c of $$('#obsForm .chip')) {
+    for (const c of $$('.obs .chip')) {
       const f = c.dataset.f, v = c.dataset.v, a = S.ans[f];
       const on = Array.isArray(a) ? a.includes(v) : a === v;
       c.setAttribute('aria-pressed', String(on));
       const byAi = on && (S.aiFilled[f] || []).includes(v);
       $('.mk', c).innerHTML = byAi ? '<span class="ai-mark">AI</span>' : '';
     }
+    updateObsNote();
   }
   function toggleChip(f, v) {
     const feat = J.FMAP[f];
@@ -364,7 +543,7 @@
     const n = J.answered(S.ans);
     if (!n) {
       lastRanked = [];
-      box.innerHTML = '<div class="empty-state"><span class="es-ic i-rock"></span><p>観察チェックに答えると、合いそうな岩石がここに順に出ます。</p></div>';
+      box.innerHTML = '<div class="empty-state"><span class="es-ic i-rock"></span><p>見た目の質問に答えると、合いそうな岩石がここに順に出ます。</p></div>';
       renderMini();
       return;
     }
@@ -373,8 +552,8 @@
     let html = '<ol class="cands">';
     ranked.slice(0, 6).forEach((sc, i) => {
       const r = J.BYID[sc.id];
-      html += '<li class="cand" data-g="' + esc(r.group) + '"><div class="cand-h"><span class="no">' + (i + 1) + '</span><button type="button" class="rname" data-rock="' + r.id + '">' + esc(r.name) + '</button>' + gb(r) +
-        '<span class="pct">' + sc.pct + '%</span></div><div class="bar"><i style="width:' + sc.pct + '%"></i></div><div class="why">' + whyHtml(sc) + '</div></li>';
+      html += '<li class="cand" data-g="' + esc(r.group) + '">' + thumb(r, i) + '<div class="cand-b"><div class="cand-h"><button type="button" class="rname" data-rock="' + r.id + '">' + esc(r.name) + '</button>' + gb(r) +
+        '<span class="pct">' + sc.pct + '<small>%</small></span></div><div class="bar"><i style="width:' + sc.pct + '%"></i></div><div class="why">' + whyHtml(sc) + '</div></div></li>';
     });
     html += '</ol>';
     const nx = J.nextQuestion(S.ans, ranked);
@@ -417,7 +596,7 @@
     const box = $('#aiBox');
     const btn = $('#btnAi');
     btn.disabled = S.aiBusy;
-    btn.textContent = S.ai ? '写真と観察でもう一度 AI に見てもらう' : '写真と観察を AI に見てもらう';
+    btn.textContent = S.ai ? 'もう一度 AI に見てもらう' : '写真と観察を AI に見てもらう';
     if (S.aiBusy) { box.innerHTML = '<div class="msg info"><span class="spin"></span>' + esc(S.aiStatus) + '</div>'; return; }
     let html = '';
     if (S.aiErr) {
@@ -427,33 +606,37 @@
     if (!S.ai) {
       if (!S.aiErr) {
         if (!getKey()) html += '<p class="hint">AI 判定には Gemini の API キーが要ります（無料枠あり）。<a href="#" data-tab-go="settings">設定タブで入れる</a></p>';
-        else if (!S.photos.length) html += '<p class="hint">写真を入れてから押してください。観察チェックの答えも一緒に AI に渡します。</p>';
-        else html += '<p class="hint">写真 ' + S.photos.length + ' 枚と、観察チェックの答え・場所を AI に渡します。</p>';
+        else if (!S.photos.length) html += '<p class="hint">写真を入れてから押してください。質問の答えも一緒に AI に渡します。</p>';
+        else html += '<p class="hint">写真 ' + S.photos.length + ' 枚と、質問の答え・場所を AI に渡します。</p>';
       }
       box.innerHTML = html;
       return;
     }
     const res = S.ai.result;
-    if (!res.is_rock) html += '<div class="msg warn">写真の主役が岩石ではないようです。岩石の新しい割れ口が大きく写るように撮り直すと判定しやすくなります。</div>';
+    if (res.subject === 'mineral') html += '<div class="msg info">鉱物として判定しました。硬さ・条痕の色・割れ方を確かめると、さらにしぼれます。</div>';
+    else if (res.subject === 'fossil') html += '<div class="msg info">化石が主役のようです。化石をふくむ岩石として判定しました。</div>';
+    else if (!res.is_rock) html += '<div class="msg warn">写真の主役が岩石や鉱物ではないようです。石の新しい割れ口が大きく写るように撮り直すと判定しやすくなります。</div>';
     if (res.photo_note) html += '<div class="msg info">撮り方について：' + esc(res.photo_note) + '</div>';
     const nAns = J.answered(S.ans);
     html += '<ol class="cands" style="margin-top:8px">';
     res.candidates.forEach((c, i) => {
       const rock = J.BYID[c.id];
       const rule = rock && nAns >= 2 ? J.scoreRock(rock, S.ans).pct : null;
-      html += '<li class="cand" data-g="' + esc(rock ? rock.group : 'other') + '"><div class="cand-h"><span class="no">' + (i + 1) + '</span>' +
-        (rock ? '<button type="button" class="rname" data-rock="' + rock.id + '">' + esc(rock.name) + '</button>' + gb(rock) : '<b>' + esc(c.name) + '</b><span class="gb" data-g="other">図鑑にない</span>') +
-        '<span class="pct">' + c.confidence + '%</span></div><div class="bar"><i style="width:' + c.confidence + '%"></i></div>' +
-        (rule != null ? '<div class="why"><span class="' + (rule >= 60 ? 'y' : 'n') + '">観察チェックとの一致 ' + rule + '%</span></div>' : '') +
+      const isMin = !rock && c.kind === 'mineral';
+      html += '<li class="cand" data-g="' + (rock ? esc(rock.group) : isMin ? 'mineral' : 'other') + '">' + thumb(rock, i, isMin ? 'mineral' : 'other') + '<div class="cand-b"><div class="cand-h">' +
+        (rock ? '<button type="button" class="rname" data-rock="' + rock.id + '">' + esc(rock.name) + '</button>' + gb(rock) : '<b class="rname">' + esc(c.name) + '</b><span class="gb" data-g="' + (isMin ? 'mineral">鉱物' : 'other">図鑑にない') + '</span>') +
+        '<span class="pct">' + c.confidence + '<small>%</small></span></div><div class="bar"><i style="width:' + c.confidence + '%"></i></div>' +
+        (c.props ? '<p class="props">' + esc(c.props) + '</p>' : '') +
+        (rule != null ? '<div class="why"><span class="' + (rule >= 60 ? 'y' : 'n') + '">質問の答えとの一致 ' + rule + '%</span></div>' : '') +
         (c.reasons.length ? '<ul class="ul ok">' + c.reasons.map((x) => '<li>' + esc(x) + '</li>').join('') + '</ul>' : '') +
-        (c.against.length ? '<ul class="ul ng">' + c.against.map((x) => '<li>' + esc(x) + '</li>').join('') + '</ul>' : '') + '</li>';
+        (c.against.length ? '<ul class="ul ng">' + c.against.map((x) => '<li>' + esc(x) + '</li>').join('') + '</ul>' : '') + '</div></li>';
     });
     if (!res.candidates.length) html += '<li class="cand empty">候補が返ってきませんでした。</li>';
     html += '</ol>';
     if (res.next_checks.length) html += '<div class="next"><b>現物で確かめるとよいこと</b><ul class="ul" style="margin-left:0">' + res.next_checks.map((x) => '<li>' + esc(x) + '</li>').join('') + '</ul></div>';
     if (res.comment) html += '<p class="small">' + esc(res.comment) + '</p>';
     const nObs = unansweredObserved();
-    if (nObs) html += '<div class="row" style="margin-top:10px"><button type="button" class="btn tonal ic i-check" id="btnAiFill">AI が写真から読み取った特徴を観察チェックに入れる（' + nObs + '項目）</button></div>';
+    if (nObs) html += '<div class="row" style="margin-top:10px"><button type="button" class="btn tonal ic i-check" id="btnAiFill">AI が写真から読み取った特徴を質問の答えに入れる（' + nObs + '項目）</button></div>';
     html += '<p class="small">数字は AI がつけた確からしさの目安です。モデル：' + esc(S.ai.modelVersion || S.ai.model) + (S.ai.fellBack ? '（混雑のため切り替え）' : '') + '・' + esc(fmtDate(S.ai.at)) + '</p>';
     box.innerHTML = html;
   }
@@ -462,7 +645,7 @@
     if (!S.photos.length) { toast('写真を1枚以上入れてください'); $('#secPhotos').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
     const key = getKey();
     if (!key) { S.aiErr = new AI.AIError('API キーが入っていません。設定タブで Gemini の API キーを入れてください。', 'nokey'); renderAi(); return; }
-    if (navigator.onLine === false) { S.aiErr = new AI.AIError('電波がないようです。AI 判定はネットにつながっているときに使えます（観察チェックは電波がなくても使えます）。', 'net'); renderAi(); return; }
+    if (navigator.onLine === false) { S.aiErr = new AI.AIError('電波がないようです。AI 判定はネットにつながっているときに使えます（見た目の質問は電波がなくても使えます）。', 'net'); renderAi(); return; }
     S.aiBusy = true; S.aiErr = null; S.aiStatus = '準備しています…';
     renderAi();
     try {
@@ -497,7 +680,7 @@
     $('#btnSave').textContent = S.savedId ? '記録を上書き保存' : '記録に保存';
   }
   async function saveRecord() {
-    if (!S.photos.length && !J.answered(S.ans) && !S.ai) { toast('写真か観察チェックを入れてから保存してください'); return; }
+    if (!S.photos.length && !J.answered(S.ans) && !S.ai) { toast('写真か質問の答えを入れてから保存してください'); return; }
     const finalText = $('#inFinal').value.trim();
     const fr = J.findRock(finalText);
     S.place.text = $('#inPlace').value.trim();
@@ -597,15 +780,15 @@
     let cmp = '';
     if (J.answered(S.ans)) {
       const sc = J.scoreRock(r, S.ans);
-      cmp = '<div class="msg info">いま判定中の観察チェックとの一致：<b>' + sc.pct + '%</b>' +
+      cmp = '<div class="msg info">いま調べている石の答えとの一致：<b>' + sc.pct + '%</b>' +
         (sc.misses.length ? '<br>合わない点：' + sc.misses.map((m) => esc(J.optLabel(m.f, m.v))).join('、') : '') + '</div>';
     }
-    return '<div class="rk" data-g="' + esc(r.group) + '"><div class="hero"><h1>' + esc(r.name) + '</h1><p class="sub">' + esc(r.kana) + '・' + esc(r.en) + gb(r) + '</p></div>' +
+    return '<div class="rk" data-g="' + esc(r.group) + '"><div class="hero"><div class="hero-art">' + rockArt(r) + '</div><div class="hero-t">' + gb(r) + '<h1>' + esc(r.name) + '</h1><p class="sub">' + esc(r.kana) + '・' + esc(r.en) + '</p></div></div>' +
       '<p>' + esc(r.desc) + '</p>' + cmp +
       '<h3>見分けのポイント</h3><ul>' + r.keys.map((k) => '<li>' + esc(k) + '</li>').join('') + '</ul>' +
       (r.similar.length ? '<h3>似ている岩石との見分け方</h3>' + r.similar.map((s) => '<button type="button" class="sim" data-rock="' + s.id + '"><b>' + esc(rockName(s.id)) + '</b><span>' + esc(s.how) + '</span></button>').join('') : '') +
       '<h3>日本での産地・産状</h3><p>' + esc(r.japan) + '</p>' +
-      '<h3>観察チェックでの特徴</h3><table>' + rows.join('') + '</table>' +
+      '<h3>見た目の特徴</h3><table>' + rows.join('') + '</table>' +
       (r.alias && r.alias.length ? '<p class="small">別名・関連する名前：' + esc(r.alias.join('、')) + '</p>' : '') + '</div>';
   }
   function openRock(id) {
@@ -628,7 +811,7 @@
       if (zGroup !== 'all' && zGroup !== g.id) continue;
       const rs = hits.filter((r) => r.group === g.id);
       if (!rs.length) continue;
-      html += '<div class="zgroup" data-g="' + esc(g.id) + '">' + esc(g.name) + '<span>' + rs.length + '</span></div>' + rs.map((r) => '<button type="button" class="zitem" data-g="' + esc(r.group) + '" data-rock="' + r.id + '"><b>' + esc(r.name) + '</b><span class="kana">' + esc(r.kana) + '・' + esc(r.en) + '</span><p>' + esc(r.keys[0]) + '</p></button>').join('');
+      html += '<div class="zgroup" data-g="' + esc(g.id) + '">' + esc(g.name) + '<span>' + rs.length + '</span></div>' + rs.map((r) => '<button type="button" class="zitem" data-g="' + esc(r.group) + '" data-rock="' + r.id + '"><span class="z-art">' + rockArt(r) + '</span><span class="z-b"><b>' + esc(r.name) + '</b><span class="kana">' + esc(r.kana) + '・' + esc(r.en) + '</span><span class="z-d">' + esc(r.keys[0]) + '</span></span></button>').join('');
     }
     $('#zList').innerHTML = html || '<p class="empty">見つかりませんでした。</p>';
   }
@@ -656,7 +839,8 @@
     $('#recCount').textContent = recs.length ? String(recs.length) : '';
     if (!recs.length) { $('#recList').innerHTML = '<div class="empty-state"><span class="es-ic i-rock"></span><b>まだ記録はありません</b><p>判定タブで石を調べて「記録に保存」を押すと、ここにたまります。</p><button type="button" class="btn primary ic i-search" data-tab-go="judge">石を判定する</button></div>'; return; }
     $('#recList').innerHTML = recs.map((r) => {
-      let img = '<span class="noimg"><span class="es-ic i-rock"></span></span>';
+      const fr = r.final && r.final.id && J.BYID[r.final.id];
+      let img = fr ? '<span class="noimg">' + rockArt(fr) + '</span>' : '<span class="noimg"><span class="es-ic i-rock"></span></span>';
       if (r.photos && r.photos[0]) { const u = URL.createObjectURL(r.photos[0]); recUrls.push(u); img = '<img src="' + u + '" alt="">'; }
       const where = (r.place && r.place.text) || (r.geo && !r.geo.none ? r.geo.lith : '') || '';
       return '<button type="button" class="rec" data-rec="' + esc(r.id) + '">' + img + '<div><b>' + esc(recTitle(r)) + '</b><span>' + esc(fmtDate(r.at)) + (where ? '・' + esc(where) : '') + '</span></div></button>';
@@ -680,8 +864,8 @@
       (p.lat != null ? '<dt>緯度経度</dt><dd>' + p.lat.toFixed(5) + ', ' + p.lon.toFixed(5) + '　<a href="' + geoLink(p.lat, p.lon) + '" target="_blank" rel="noopener">地理院地図</a></dd>' : '') +
       (rec.geo && !rec.geo.none ? '<dt>地質図</dt><dd>' + esc(geoText(rec.geo)) + '</dd>' : '') + '</dl>' +
       (ai ? '<h3>AI の判定</h3><ol>' + ai.candidates.map((c) => '<li>' + esc(c.name) + '　' + c.confidence + '%</li>').join('') + '</ol>' + (ai.comment ? '<p class="small">' + esc(ai.comment) + '</p>' : '') : '') +
-      (rec.rule && rec.rule.length ? '<h3>観察からの候補</h3><ol>' + rec.rule.slice(0, 3).map((x) => '<li>' + esc(rockName(x.id)) + '　' + x.pct + '%</li>').join('') + '</ol>' : '') +
-      (ansRows ? '<h3>観察チェックの答え</h3><dl class="kv">' + ansRows + '</dl>' : '') + '</div>' +
+      (rec.rule && rec.rule.length ? '<h3>質問の答えからの候補</h3><ol>' + rec.rule.slice(0, 3).map((x) => '<li>' + esc(rockName(x.id)) + '　' + x.pct + '%</li>').join('') + '</ol>' : '') +
+      (ansRows ? '<h3>質問の答え</h3><dl class="kv">' + ansRows + '</dl>' : '') + '</div>' +
       '<div class="row" style="margin-top:18px"><button type="button" class="btn ic i-up" id="recLoad">判定画面に読み込む</button><button type="button" class="btn danger ic i-trash" id="recDel">この記録を消す</button></div>';
   }
   async function openRecord(id) {
@@ -819,12 +1003,20 @@
       if (go) { e.preventDefault(); if (sheetStack.length) closeSheet(); switchTab(go.dataset.tabGo); return; }
       const rk = t.closest('[data-rock]');
       if (rk) { openRock(rk.dataset.rock); return; }
-      const chip = t.closest('#obsForm .chip');
+      const chip = t.closest('.obs .chip');
       if (chip) { toggleChip(chip.dataset.f, chip.dataset.v); return; }
       const hp = t.closest('[data-help]');
       if (hp) { const el = $('#help-' + hp.dataset.help); if (el) el.hidden = !el.hidden; return; }
       const gt = t.closest('[data-goto]');
-      if (gt) { const q = $('#q-' + gt.dataset.goto); if (q) q.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+      if (gt) {
+        const f = gt.dataset.goto;
+        let q = obsMode === 'easy' ? $('#qe-' + f) : null;
+        if (!q) { if (obsMode === 'easy') setObsMode('detail'); q = $('#q-' + f); }
+        if (q) q.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+      const om = t.closest('#obsMode button');
+      if (om) { setObsMode(om.dataset.mode); return; }
       const ph = t.closest('[data-ph]');
       if (ph) { openSheet('写真', '<img class="bigph" src="' + ph.getAttribute('src') + '" alt="">'); return; }
       const dp = t.closest('[data-delph]');
@@ -859,7 +1051,7 @@
     $('#inFinal').addEventListener('input', saveDraft);
     $('#inMemo').addEventListener('input', saveDraft);
     $('#btnObsReset').addEventListener('click', () => {
-      if (J.answered(S.ans) && !confirm('観察チェックの答えをすべて消しますか？')) return;
+      if (J.answered(S.ans) && !confirm('質問の答えをすべて消しますか？')) return;
       S.ans = {}; S.aiFilled = {};
       updateChips(); renderRule(); renderAi(); saveDraft();
     });
@@ -916,14 +1108,14 @@
     $('#rockNames').innerHTML = J.ROCKS.map((r) => '<option value="' + esc(r.name) + '">').join('');
     if (location.hash === '#selftest') { runSelftest(); window.__gansekiReady = true; return; }
     bind();
-    buildObs();
+    buildObs(); buildEasy(); setObsMode(lsGet(LS.obsMode, 'easy'));
     await restoreDraft();
     renderPhotos(); renderGeo(); updateChips(); renderRule(); renderAi(); updatePlaceholder();
     refreshRecCount();
     const t = lsGet(LS.tab, 'judge');
     switchTab(['judge', 'zukan', 'records', 'settings'].includes(t) ? t : 'judge');
     if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
-      navigator.serviceWorker.register('sw.js').catch(() => { /* 圏外対応なしでも動かす */ });
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => { /* 圏外対応なしでも動かす */ });
     }
     window.__ganseki = { S, IDB, J, AI, version: APP_VERSION };
     window.__gansekiReady = true;

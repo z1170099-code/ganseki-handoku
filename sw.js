@@ -1,15 +1,16 @@
 /* 岩石判読：Service Worker（電波のない所でも開けるようにする）
  * アプリ本体はネットを先に試し、だめなら保存しておいたものを使う（4 秒で見切る）。
+ * ネットに取りにいくときはブラウザの一時保存を使わない（GitHub Pages は 10 分ほど古い版を返すことがあるため）。
  * Gemini と地質図への問い合わせは保存しない（いつもネットに取りにいく）。
  * 版を上げるときは SHELL の末尾を app.js の APP_VERSION とそろえる（tools/check_data.py が点検する）。
  */
-const SHELL = 'ganseki-shell-1.2.0';
+const SHELL = 'ganseki-shell-1.3.0';
 const OWN = ['./', './index.html', './app.js', './judge.js', './ai.js', './rocks.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil((async () => {
     const c = await caches.open(SHELL);
-    await c.addAll(OWN);
+    await c.addAll(OWN.map((u) => new Request(u, { cache: 'no-cache' })));
     await self.skipWaiting();
   })());
 });
@@ -23,7 +24,7 @@ self.addEventListener('activate', (e) => {
 async function own(req) {
   const c = await caches.open(SHELL);
   try {
-    const r = await Promise.race([fetch(req), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 4000))]);
+    const r = await Promise.race([fetch(req, { cache: 'no-cache' }), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 4000))]);
     if (r.ok) c.put(req, r.clone());
     return r;
   } catch (err) {

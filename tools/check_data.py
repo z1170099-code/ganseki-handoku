@@ -67,6 +67,27 @@ def main():
         if len(vs) != len(set(vs)):
             ng(f"観察項目 {fid} の選択肢の v が重なっている")
 
+    # 「かんたん」の質問：観察項目と選択肢のコードは features と同じものだけ使える
+    for e in db.get("easy", []):
+        fid = e.get("f")
+        if fid not in feats:
+            ng(f"easy の f '{fid}' は観察項目にない")
+            continue
+        if not e.get("q"):
+            ng(f"easy の {fid} に q（質問の文）がない")
+        if e.get("kind") not in ("pics", "swatch", "grain", "plain"):
+            ng(f"easy の {fid} の kind は pics / swatch / grain / plain のどれか")
+        for v, lab in e.get("opts", {}).items():
+            if v not in opts[fid]:
+                ng(f"easy の {fid} の '{v}' は選択肢にない")
+            if not isinstance(lab, list) or not lab or not lab[0]:
+                ng(f"easy の {fid}.{v} は [\"短い言葉\", \"補足（なくてもよい）\"] の形にする")
+        missing = opts[fid] - set(e.get("opts", {}))
+        if missing:
+            warn(f"easy の {fid} に入っていない選択肢: {' '.join(sorted(missing))}")
+    if db.get("easy") is not None:
+        print(f"かんたんの質問 {len(db['easy'])} 個")
+
     seen = set()
     for r in db["rocks"]:
         rid = r.get("id", "?")
